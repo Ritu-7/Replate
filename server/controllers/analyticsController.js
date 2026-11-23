@@ -370,27 +370,39 @@ const getAdminAnalytics = async (req, res, next) => {
 
 const getGlobalImpact = async (req, res, next) => {
   try {
-    const totalReservations = await Reservation.countDocuments({ status: "COMPLETED" });
-    const allCompleted = await Reservation.find({ status: "COMPLETED" }).populate("foodId", "quantity");
-    
+    // All completed reservations with their food details
+    const allCompleted = await Reservation.find({ status: "COMPLETED" }).populate("foodId", "quantity originalPrice");
+
     let totalPlates = 0;
-    allCompleted.forEach(res => {
-      const q = res.quantity || (res.foodId && res.foodId.quantity) || 1;
-      totalPlates += q;
+    let totalValueRecovered = 0;
+    allCompleted.forEach(r => {
+      const qty = r.quantity || (r.foodId && r.foodId.quantity) || 1;
+      totalPlates += qty;
+      // Value recovered = originalPrice × quantity reserved (what would have been wasted)
+      const origPrice = (r.foodId && r.foodId.originalPrice) || 0;
+      totalValueRecovered += origPrice * qty;
     });
 
-    const co2Saved = ((totalPlates * 2.5) / 1000).toFixed(1);
+    // Food diverted in kg (each plate/unit ≈ 0.4 kg)
+    const foodDivertedKg = totalPlates * 0.4;
+    const foodDivertedTons = (foodDivertedKg / 1000).toFixed(1);
+
+    // Unique business donors who have at least 1 food listing
+    const uniqueDonorIds = await Food.distinct("businessId");
+    const foodPartners = uniqueDonorIds.length;
+
     const donorsCount = await User.countDocuments({ role: "BUSINESS" });
     const ngosCount = await User.countDocuments({ role: "RECIPIENT" });
 
+    // Leaderboard — top 5 donors by total plates listed
     const topDonors = await Food.aggregate([
       { $group: { _id: "$businessId", totalPlates: { $sum: "$quantity" } } },
       { $sort: { totalPlates: -1 } },
       { $limit: 5 }
     ]);
-    
+
     const populatedDonors = await User.populate(topDonors, { path: "_id", select: "name location" });
-    
+
     const leaderboard = populatedDonors.map(donor => ({
       name: donor._id ? donor._id.name : "Anonymous Partner",
       location: donor._id && donor._id.location ? donor._id.location.city : "NCR Region",
@@ -401,7 +413,10 @@ const getGlobalImpact = async (req, res, next) => {
       success: true,
       impact: {
         totalPlatesSaved: totalPlates,
-        co2EmissionsSaved: co2Saved + " Tons",
+        foodDivertedKg: Math.round(foodDivertedKg),
+        foodDivertedTons: foodDivertedTons + " Tons",
+        valueRecovered: totalValueRecovered,
+        foodPartners,
         commercialDonors: donorsCount,
         ngoBeneficiaries: ngosCount,
         leaderboard

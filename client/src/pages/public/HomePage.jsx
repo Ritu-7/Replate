@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import {
   Utensils,
@@ -21,33 +21,14 @@ import {
 
 import { useTranslation } from "react-i18next";
 import { Button, Badge, Card, StatCard } from "../../components/common";
+import api from "../../services/api";
 
-// Impact statistics mock dataset
-const impactMetrics = [
-  {
-    value: "12,480+",
-    label: "Meals Rescued",
-    helper: "Plates served to community",
-    icon: Utensils,
-  },
-  {
-    value: "8.7 Tons",
-    label: "Food Diverted",
-    helper: "Methane emissions offset",
-    icon: Leaf,
-  },
-  {
-    value: "₹4.2L",
-    label: "Value Recovered",
-    helper: "Returned to food businesses",
-    icon: DollarSign,
-  },
-  {
-    value: "96",
-    label: "Food Partners",
-    helper: "Noida & Delhi NCR network",
-    icon: Building2,
-  },
+// Impact statistics — fetched live from the API in the component below
+const fallbackMetrics = [
+  { value: "—", label: "Meals Rescued", helper: "Plates served to community", icon: Utensils },
+  { value: "—", label: "Food Diverted", helper: "Methane emissions offset", icon: Leaf },
+  { value: "—", label: "Value Recovered", helper: "Returned to food businesses", icon: DollarSign },
+  { value: "—", label: "Food Partners", helper: "Noida & Delhi NCR network", icon: Building2 },
 ];
 
 // 4-Step How It Works dataset
@@ -131,8 +112,55 @@ const recipientFeatures = [
   },
 ];
 
+// Helper: format a rupee value as ₹X.XL / ₹XX.Xk etc.
+const formatRupees = (val) => {
+  if (!val) return "₹0";
+  if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
+  if (val >= 1000)   return `₹${(val / 1000).toFixed(1)}k`;
+  return `₹${val}`;
+};
+
 const HomePage = () => {
   const { t } = useTranslation();
+
+  const [impactMetrics, setImpactMetrics] = useState(fallbackMetrics);
+  const [impactLoading, setImpactLoading] = useState(true);
+
+  useEffect(() => {
+    api.get("/analytics/impact")
+      .then(({ data }) => {
+        const d = data.impact || {};
+        setImpactMetrics([
+          {
+            value: d.totalPlatesSaved ? `${d.totalPlatesSaved.toLocaleString("en-IN")}+` : "—",
+            label: "Meals Rescued",
+            helper: "Plates served to community",
+            icon: Utensils,
+          },
+          {
+            value: d.foodDivertedTons || (d.foodDivertedKg ? `${(d.foodDivertedKg / 1000).toFixed(1)} Tons` : "—"),
+            label: "Food Diverted",
+            helper: "Methane emissions offset",
+            icon: Leaf,
+          },
+          {
+            value: d.valueRecovered ? formatRupees(d.valueRecovered) : "—",
+            label: "Value Recovered",
+            helper: "Returned to food businesses",
+            icon: DollarSign,
+          },
+          {
+            value: d.foodPartners != null ? String(d.foodPartners) : "—",
+            label: "Food Partners",
+            helper: "Noida & Delhi NCR network",
+            icon: Building2,
+          },
+        ]);
+      })
+      .catch(() => { /* keep fallback */ })
+      .finally(() => setImpactLoading(false));
+  }, []);
+
   return (
     <div className="space-y-20 sm:space-y-24 pb-20 overflow-x-hidden page-enter">
       {/* 1. HERO SECTION */}
@@ -298,10 +326,10 @@ const HomePage = () => {
               <StatCard
                 key={idx}
                 title={stat.label}
-                value={stat.value}
+                value={impactLoading ? "…" : stat.value}
                 icon={stat.icon}
                 helperText={stat.helper}
-                className="bg-surface-50 border-charcoal-100 hover:border-brand-200"
+                className={`bg-surface-50 border-charcoal-100 hover:border-brand-200 transition-opacity duration-500 ${impactLoading ? "opacity-60 animate-pulse" : "opacity-100"}`}
               />
             ))}
           </div>
